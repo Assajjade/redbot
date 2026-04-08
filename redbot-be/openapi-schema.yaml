@@ -1,0 +1,184 @@
+openapi: 3.0.3
+info:
+  title: Redbot Backend API
+  version: 1.0.0
+  description: REST API backend for WhatsApp menstrual-cycle chatbot.
+paths:
+  /api/chatbot/mode/:
+    post:
+      operationId: chatbot_mode_create
+      tags:
+      - Chatbot
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModeDispatch'
+            examples:
+              AIModeRequest:
+                value:
+                  mode: ai_qna
+                  user_id: '628123456789'
+                  prompt: Apa itu siklus menstruasi normal?
+                summary: AI Mode Request
+              PresetStartRequest:
+                value:
+                  mode: preset_interaction
+                  user_id: '628123456789'
+                summary: Preset Start Request
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ModeDispatch'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ModeDispatch'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          description: Successful chatbot response
+        '400':
+          description: Input validation error
+        '401':
+          description: Unauthorized
+        '502':
+          description: External AI service error
+  /api/chatbot/webhooks/whatsapp/:
+    get:
+      operationId: chatbot_webhooks_whatsapp_retrieve
+      tags:
+      - WhatsApp Webhook
+      security:
+      - {}
+      responses:
+        '200':
+          description: Webhook verification success
+        '403':
+          description: Webhook verification failed
+    post:
+      operationId: chatbot_webhooks_whatsapp_create
+      tags:
+      - WhatsApp Webhook
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WhatsAppWebhookPayload'
+            examples:
+              WebhookInboundPayload:
+                value:
+                  entry:
+                  - changes:
+                    - value:
+                        messages:
+                        - from: '628123456789'
+                          text:
+                            body: 'ai: apakah menstruasi normal 5 hari?'
+                summary: Webhook Inbound Payload
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/WhatsAppWebhookPayload'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/WhatsAppWebhookPayload'
+        required: true
+      security:
+      - {}
+      responses:
+        '200':
+          description: Inbound webhook processed
+        '400':
+          description: Invalid payload
+        '401':
+          description: Invalid webhook bearer token
+  /api/token/:
+    post:
+      operationId: token_create
+      tags:
+      - token
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AuthToken'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AuthToken'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthToken'
+        required: true
+      security:
+      - tokenAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthToken'
+          description: ''
+components:
+  schemas:
+    AuthToken:
+      type: object
+      properties:
+        username:
+          type: string
+          writeOnly: true
+        password:
+          type: string
+          writeOnly: true
+        token:
+          type: string
+          readOnly: true
+      required:
+      - password
+      - token
+      - username
+    ModeDispatch:
+      type: object
+      properties:
+        mode:
+          $ref: '#/components/schemas/ModeEnum'
+        user_id:
+          type: string
+          maxLength: 64
+        message:
+          type: string
+          nullable: true
+        prompt:
+          type: string
+          nullable: true
+      required:
+      - mode
+      - user_id
+    ModeEnum:
+      enum:
+      - ai_qna
+      - preset_interaction
+      type: string
+      description: |-
+        * `ai_qna` - ai_qna
+        * `preset_interaction` - preset_interaction
+    WhatsAppWebhookPayload:
+      type: object
+      properties:
+        entry:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+      required:
+      - entry
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sessionid
+    tokenAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: Token-based authentication with required prefix "Token"
