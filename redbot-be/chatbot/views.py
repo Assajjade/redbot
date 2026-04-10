@@ -2,8 +2,7 @@ from django.conf import settings
 from django.db import transaction
 from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema
 from rest_framework import status
-from rest_framework.authentication import TokenAuthentication
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
@@ -23,6 +22,35 @@ from .services import (
     parse_webhook_mode_and_message,
 )
 from .utils import log_interaction
+
+
+RESET_COMMANDS = {"reset", "restart"}
+RESET_HINT_MESSAGE = (
+    "Kamu sudah 3x salah input. Untuk memulai ulang percakapan, "
+    "ketik 'reset' atau 'restart'."
+)
+
+
+def reset_preset_user(user: ChatbotUser):
+    user.preset_state = PresetState.AWAITING_MENSTRUATING
+    user.invalid_input_count = 0
+    user.is_currently_menstruating = None
+    user.last_period_start_date = None
+    user.period_end_date = None
+    user.has_ttd_pill = None
+    user.reminder_hour_24 = None
+    user.save(
+        update_fields=[
+            "preset_state",
+            "invalid_input_count",
+            "is_currently_menstruating",
+            "last_period_start_date",
+            "period_end_date",
+            "has_ttd_pill",
+            "reminder_hour_24",
+            "updated_at",
+        ]
+    )
 
 
 def handle_ai_qna(user_id: str, prompt: str, endpoint_name: str):
@@ -157,13 +185,40 @@ def advance_preset_flow(user: ChatbotUser, message: str):
 
 def handle_preset_interaction(user_id: str, message: str | None, endpoint_name: str):
     raw_message = (message or "").strip()
+    normalized_message = raw_message.lower()
 
     with transaction.atomic():
         user, _ = ChatbotUser.objects.get_or_create(user_id=user_id)
 
+        if normalized_message in RESET_COMMANDS:
+            reset_preset_user(user)
+            bot_message = "Data kamu sudah direset. Yuk mulai lagi dari awal: Apakah kamu sedang menstruasi sekarang?"
+            response_payload = {
+                "mode": "preset_interaction",
+                "state": user.preset_state,
+                "response": bot_message,
+                "action": "reset",
+            }
+            log_interaction(
+                user=user,
+                user_id=user_id,
+                mode=InteractionLog.MODE_PRESET,
+                endpoint=endpoint_name,
+                user_message=raw_message,
+                bot_response=bot_message,
+                status=InteractionLog.STATUS_SUCCESS,
+                metadata={
+                    "state": user.preset_state,
+                    "invalid_input_count": user.invalid_input_count,
+                    "action": "reset",
+                },
+            )
+            return Response(response_payload, status=status.HTTP_200_OK)
+
         if user.preset_state in {PresetState.NOT_STARTED, PresetState.COMPLETED}:
             user.preset_state = PresetState.AWAITING_MENSTRUATING
-            user.save(update_fields=["preset_state", "updated_at"])
+            user.invalid_input_count = 0
+            user.save(update_fields=["preset_state", "invalid_input_count", "updated_at"])
             bot_message = "Apakah kamu sedang menstruasi sekarang?"
             log_interaction(
                 user=user,
@@ -186,13 +241,20 @@ def handle_preset_interaction(user_id: str, message: str | None, endpoint_name: 
 
         try:
             response_payload = advance_preset_flow(user, raw_message)
+            if user.invalid_input_count != 0:
+                user.invalid_input_count = 0
+                user.save(update_fields=["invalid_input_count", "updated_at"])
             interaction_status = InteractionLog.STATUS_SUCCESS
         except InputValidationError as exc:
+            user.invalid_input_count += 1
+            user.save(update_fields=["invalid_input_count", "updated_at"])
             response_payload = {
                 "mode": "preset_interaction",
                 "state": user.preset_state,
                 "error": str(exc),
             }
+            if user.invalid_input_count >= 3:
+                response_payload["hint"] = RESET_HINT_MESSAGE
             interaction_status = InteractionLog.STATUS_ERROR
 
         log_interaction(
@@ -203,7 +265,10 @@ def handle_preset_interaction(user_id: str, message: str | None, endpoint_name: 
             user_message=raw_message,
             bot_response=response_payload.get("response") or response_payload.get("error", ""),
             status=interaction_status,
-            metadata={"state": user.preset_state},
+            metadata={
+                "state": user.preset_state,
+                "invalid_input_count": user.invalid_input_count,
+            },
         )
 
         http_status = (
@@ -214,13 +279,10 @@ def handle_preset_interaction(user_id: str, message: str | None, endpoint_name: 
         return Response(response_payload, status=http_status)
 
 
-class SecureAPIView(APIView):
-    authentication_classes = [TokenAuthentication]
-    permission_classes = [IsAuthenticated]
+class ModeDispatchAPIView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
-
-
-class ModeDispatchAPIView(SecureAPIView):
     endpoint_name = "mode-dispatch"
     throttle_scope = "chatbot_general"
 
@@ -286,6 +348,26 @@ class ModeDispatchAPIView(SecureAPIView):
                         "has_ttd_pill": True,
                         "reminder_hour_24": 20,
                     },
+                },
+                response_only=True,
+                status_codes=["200"],
+            ),
+            OpenApiExample(
+                "Preset Reset Command",
+                value={
+                    "mode": "preset_interaction",
+                    "user_id": "628123456789",
+                    "message": "reset",
+                },
+                request_only=True,
+            ),
+            OpenApiExample(
+                "Preset Reset Response",
+                value={
+                    "mode": "preset_interaction",
+                    "state": "awaiting_menstruating",
+                    "response": "Data kamu sudah direset. Yuk mulai lagi dari awal: Apakah kamu sedang menstruasi sekarang?",
+                    "action": "reset",
                 },
                 response_only=True,
                 status_codes=["200"],

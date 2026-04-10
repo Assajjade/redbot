@@ -17,6 +17,7 @@ class ChatbotUser(models.Model):
         choices=PresetState.choices,
         default=PresetState.NOT_STARTED,
     )
+    invalid_input_count = models.PositiveSmallIntegerField(default=0)
 
     is_currently_menstruating = models.BooleanField(null=True, blank=True)
     last_period_start_date = models.DateField(null=True, blank=True)

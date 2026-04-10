@@ -1,23 +1,13 @@
 from unittest.mock import patch
 
-from django.contrib.auth.models import User
 from django.test import override_settings
 from rest_framework import status
-from rest_framework.authtoken.models import Token
 from rest_framework.test import APITestCase
 
 from .models import ChatbotUser, InteractionLog, PresetState
 
 
-class AuthenticatedAPIMixin:
-    def setUp(self):
-        super().setUp()
-        self.user = User.objects.create_user(username="tester", password="secret123")
-        self.token = Token.objects.create(user=self.user)
-        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
-
-
-class PresetInteractionAPITests(AuthenticatedAPIMixin, APITestCase):
+class PresetInteractionAPITests(APITestCase):
     def test_preset_flow_generates_ics_and_saves_user_data(self):
         url = "/api/chatbot/mode/"
         user_id = "user-123"
@@ -86,17 +76,70 @@ class PresetInteractionAPITests(AuthenticatedAPIMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("error", response.data)
 
-    def test_protected_endpoint_rejects_unauthorized(self):
-        self.client.credentials()
-        response = self.client.post(
-            "/api/chatbot/mode/",
-            {"mode": "preset_interaction", "user_id": "u"},
+    def test_preset_invalid_input_shows_reset_hint_after_three_attempts(self):
+        url = "/api/chatbot/mode/"
+        user_id = "user-invalid-thrice"
+
+        self.client.post(url, {"mode": "preset_interaction", "user_id": user_id}, format="json")
+
+        for attempt in range(1, 4):
+            response = self.client.post(
+                url,
+                {"mode": "preset_interaction", "user_id": user_id, "message": "invalid-answer"},
+                format="json",
+            )
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+            self.assertIn("error", response.data)
+            if attempt < 3:
+                self.assertNotIn("hint", response.data)
+
+        self.assertIn("hint", response.data)
+        self.assertIn("ketik 'reset'", response.data["hint"])
+
+        user = ChatbotUser.objects.get(user_id=user_id)
+        self.assertEqual(user.invalid_input_count, 3)
+
+    def test_preset_reset_command_resets_state_within_mode_endpoint(self):
+        url = "/api/chatbot/mode/"
+        user_id = "user-reset-command"
+
+        self.client.post(url, {"mode": "preset_interaction", "user_id": user_id}, format="json")
+        self.client.post(
+            url,
+            {"mode": "preset_interaction", "user_id": user_id, "message": "no"},
             format="json",
         )
-        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        user = ChatbotUser.objects.get(user_id=user_id)
+        self.assertEqual(user.preset_state, PresetState.AWAITING_LAST_PERIOD_DATE)
+
+        response = self.client.post(
+            url,
+            {"mode": "preset_interaction", "user_id": user_id, "message": "reset"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["state"], PresetState.AWAITING_MENSTRUATING)
+        self.assertEqual(response.data["action"], "reset")
+
+        user.refresh_from_db()
+        self.assertEqual(user.preset_state, PresetState.AWAITING_MENSTRUATING)
+        self.assertEqual(user.invalid_input_count, 0)
+        self.assertIsNone(user.is_currently_menstruating)
+        self.assertIsNone(user.last_period_start_date)
+        self.assertIsNone(user.period_end_date)
+        self.assertIsNone(user.has_ttd_pill)
+        self.assertIsNone(user.reminder_hour_24)
+
+        reset_log_exists = InteractionLog.objects.filter(
+            external_user_id=user_id,
+            endpoint="mode-dispatch",
+            metadata__action="reset",
+        ).exists()
+        self.assertTrue(reset_log_exists)
 
 
-class AIQnAAPITests(AuthenticatedAPIMixin, APITestCase):
+class AIQnAAPITests(APITestCase):
     @override_settings(AI_API_URL="https://example.com/ai")
     @patch("chatbot.services.requests.post")
     def test_ai_qna_success(self, mocked_post):

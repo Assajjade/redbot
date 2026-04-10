@@ -26,6 +26,12 @@ paths:
                   mode: preset_interaction
                   user_id: '628123456789'
                 summary: Preset Start Request
+              PresetResetCommand:
+                value:
+                  mode: preset_interaction
+                  user_id: '628123456789'
+                  message: reset
+                summary: Preset Reset Command
           application/x-www-form-urlencoded:
             schema:
               $ref: '#/components/schemas/ModeDispatch'
@@ -34,7 +40,7 @@ paths:
               $ref: '#/components/schemas/ModeDispatch'
         required: true
       security:
-      - tokenAuth: []
+      - {}
       responses:
         '200':
           description: Successful chatbot response
@@ -92,51 +98,8 @@ paths:
           description: Invalid payload
         '401':
           description: Invalid webhook bearer token
-  /api/token/:
-    post:
-      operationId: token_create
-      tags:
-      - token
-      requestBody:
-        content:
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/AuthToken'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/AuthToken'
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AuthToken'
-        required: true
-      security:
-      - tokenAuth: []
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuthToken'
-          description: ''
 components:
   schemas:
-    AuthToken:
-      type: object
-      properties:
-        username:
-          type: string
-          writeOnly: true
-        password:
-          type: string
-          writeOnly: true
-        token:
-          type: string
-          readOnly: true
-      required:
-      - password
-      - token
-      - username
     ModeDispatch:
       type: object
       properties:
@@ -172,13 +135,3 @@ components:
             additionalProperties: {}
       required:
       - entry
-  securitySchemes:
-    cookieAuth:
-      type: apiKey
-      in: cookie
-      name: sessionid
-    tokenAuth:
-      type: apiKey
-      in: header
-      name: Authorization
-      description: Token-based authentication with required prefix "Token"

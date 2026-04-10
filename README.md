@@ -27,19 +27,13 @@ Backend REST API for a WhatsApp chatbot focused on menstrual cycle conversations
 - Optional static export:
   - `python3 manage.py spectacular --file openapi-schema.yaml`
 
-## Auth (Production)
+## Auth
 
-API endpoints are protected with DRF Token Auth.
+No login/logout is required for chatbot endpoints in this project.
 
-1. Create user (via admin or shell)
-2. Obtain token:
-   - `POST /api/token/`
-   - body: `{ "username": "<username>", "password": "<password>" }`
-3. Send token in header:
-   - `Authorization: Token <your_token>`
-
-Protected endpoint:
-- `POST /api/chatbot/mode/`
+- `POST /api/chatbot/mode/` is public (rate-limited)
+- `GET /api/chatbot/webhooks/whatsapp/` is public for Meta verification
+- `POST /api/chatbot/webhooks/whatsapp/` uses a shared bearer token (`WHATSAPP_WEBHOOK_TOKEN`)
 
 ## Rate Limiting (Production)
 
@@ -59,7 +53,7 @@ Env-configurable rates in `.env`:
 
 Base URL: `http://127.0.0.1:8000/api/chatbot/`
 
-- `POST /mode/` (single chatbot endpoint for all modes)
+- `POST /mode/` (single chatbot endpoint for all modes, including reset command in preset flow)
 - `GET /webhooks/whatsapp/` (Meta webhook verification)
 - `POST /webhooks/whatsapp/` (provider webhook inbound)
 
@@ -117,6 +111,18 @@ Request:
 Response (`400`):
 - `{ "mode": "preset_interaction", "state": "awaiting_last_period_date", "error": "Format tanggal tidak valid. Gunakan DD/MM/YYYY, contoh: 28/01/1970." }`
 
+### Preset Reset Command Example (within mode endpoint)
+
+Users can restart preset flow by sending special messages:
+- `reset`
+- `restart`
+
+Request:
+- `{ "mode": "preset_interaction", "user_id": "628123456789", "message": "reset" }`
+
+Response:
+- `{ "mode": "preset_interaction", "state": "awaiting_menstruating", "response": "Data kamu sudah direset. Yuk mulai lagi dari awal: Apakah kamu sedang menstruasi sekarang?", "action": "reset" }`
+
 ## WhatsApp Webhook (Provider Style)
 
 ### GET verification
@@ -149,8 +155,9 @@ Validation errors handled for:
 - invalid `yes/no` answer
 - invalid date format (must be `DD/MM/YYYY`)
 - invalid reminder hour (must be integer `0..23`)
+- repeated invalid input in preset flow (`hint` appears after 3 consecutive mistakes and suggests typing `reset` or `restart`)
 - invalid webhook payload
-- invalid/missing auth tokens
+- invalid/missing webhook bearer token
 
 ## Data Storage
 
