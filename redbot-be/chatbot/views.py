@@ -521,6 +521,13 @@ class WhatsAppWebhookAPIView(APIView):
                 endpoint_name=self.endpoint_name,
             )
 
+        from .services import send_whatsapp_message
+        
+        # Ambil isi teks balasan dari response internal
+        teks_balasan = chatbot_response.data.get("response") or chatbot_response.data.get("error")
+        if teks_balasan:
+            send_whatsapp_message(to_number=user_id, message_text=teks_balasan)
+            
         return Response(
             {
                 "status": "processed",
