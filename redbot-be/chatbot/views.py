@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import transaction
+from django.http import HttpResponse
 from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.permissions import AllowAny
@@ -436,7 +437,7 @@ class WhatsAppWebhookAPIView(APIView):
         challenge = request.query_params.get("hub.challenge")
 
         if mode == "subscribe" and verify_token and verify_token == settings.WHATSAPP_WEBHOOK_VERIFY_TOKEN:
-            return Response(challenge or "", status=status.HTTP_200_OK)
+            return HttpResponse(challenge or "", status=status.HTTP_200_OK)
 
         return Response({"error": "Webhook verification failed."}, status=status.HTTP_403_FORBIDDEN)
 
@@ -494,10 +495,10 @@ class WhatsAppWebhookAPIView(APIView):
         tags=["WhatsApp Webhook"],
     )
     def post(self, request):
-        expected_token = settings.WHATSAPP_WEBHOOK_TOKEN
-        provided_header = request.headers.get("Authorization", "")
-        if expected_token and provided_header != f"Bearer {expected_token}":
-            return Response({"error": "Invalid webhook bearer token."}, status=status.HTTP_401_UNAUTHORIZED)
+        # expected_token = settings.WHATSAPP_WEBHOOK_TOKEN
+        # provided_header = request.headers.get("Authorization", "")
+        # if expected_token and provided_header != f"Bearer {expected_token}":
+        #     return Response({"error": "Invalid webhook bearer token."}, status=status.HTTP_401_UNAUTHORIZED)
 
         try:
             extracted = extract_whatsapp_message(request.data)
