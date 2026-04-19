@@ -164,3 +164,30 @@ def extract_whatsapp_message(payload: dict):
         return {"user_id": sender, "message": text_body}
     except (IndexError, AttributeError, TypeError) as exc:
         raise InputValidationError("Invalid WhatsApp webhook payload format.") from exc
+
+def send_whatsapp_message(to_number: str, message_text: str):
+    phone_number_id = settings.WHATSAPP_PHONE_NUMBER_ID
+    access_token = settings.WHATSAPP_WEBHOOK_TOKEN
+    
+    if not phone_number_id or not access_token:
+        logger.error("Kredensial WhatsApp belum dikonfigurasi di settings.")
+        return
+
+    url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to_number,
+        "type": "text",
+        "text": {"body": message_text},
+    }
+    
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        response.raise_for_status()
+        logger.info(f"Pesan WA berhasil dikirim ke {to_number}")
+    except requests.RequestException as exc:
+        logger.error(f"Gagal mengirim pesan WA ke {to_number}: {response.text if 'response' in locals() else exc}")
