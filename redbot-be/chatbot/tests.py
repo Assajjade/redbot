@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import override_settings
@@ -140,11 +141,11 @@ class PresetInteractionAPITests(APITestCase):
 
 
 class AIQnAAPITests(APITestCase):
-    @override_settings(AI_API_URL="https://example.com/ai")
-    @patch("chatbot.services.requests.post")
-    def test_ai_qna_success(self, mocked_post):
-        mocked_post.return_value.status_code = 200
-        mocked_post.return_value.json.return_value = {"response": "Ini jawaban AI"}
+    @override_settings(OPENAI_API_KEY="sk-test", OPENAI_MODEL="gpt-5.4-nano")
+    @patch("chatbot.services.OpenAI")
+    def test_ai_qna_success(self, mocked_openai):
+        mocked_client = mocked_openai.return_value
+        mocked_client.responses.create.return_value = SimpleNamespace(output_text="Ini jawaban AI")
 
         response = self.client.post(
             "/api/chatbot/mode/",
@@ -183,13 +184,14 @@ class WhatsAppWebhookAPITests(APITestCase):
         self.assertEqual(response.data, "12345")
 
     @override_settings(
-        AI_API_URL="https://example.com/ai",
+        OPENAI_API_KEY="sk-test",
+        OPENAI_MODEL="gpt-5.4-nano",
         WHATSAPP_WEBHOOK_TOKEN="wh-token",
     )
-    @patch("chatbot.services.requests.post")
-    def test_webhook_post_processes_inbound_message(self, mocked_post):
-        mocked_post.return_value.status_code = 200
-        mocked_post.return_value.json.return_value = {"response": "Jawaban webhook AI"}
+    @patch("chatbot.services.OpenAI")
+    def test_webhook_post_processes_inbound_message(self, mocked_openai):
+        mocked_client = mocked_openai.return_value
+        mocked_client.responses.create.return_value = SimpleNamespace(output_text="Jawaban webhook AI")
 
         payload = {
             "entry": [

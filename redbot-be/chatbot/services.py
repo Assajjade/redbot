@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 import requests
+from openai import OpenAI
 from django.conf import settings
 from django.utils import timezone
 
@@ -12,6 +13,15 @@ logger = logging.getLogger(__name__)
 
 YES_INPUTS = {"yes", "y", "iya", "ya", "true", "1"}
 NO_INPUTS = {"no", "n", "tidak", "false", "0"}
+
+ANEMIA_MENSTRUASI_SYSTEM_PROMPT = (
+    "Kamu adalah asisten kesehatan reproduksi yang hanya boleh membahas dua topik: "
+    "anemia dan menstruasi. Selalu jawab dalam Bahasa Indonesia yang jelas, ramah, dan mudah dipahami. "
+    "Jika pertanyaan di luar topik anemia/menstruasi, tolak dengan sopan dan arahkan pengguna "
+    "untuk bertanya seputar anemia atau menstruasi. "
+    "Berikan edukasi umum yang aman dan tidak menggantikan diagnosis dokter. "
+    "Jika ada gejala berat/berbahaya, sarankan segera konsultasi ke tenaga kesehatan."
+)
 
 
 @dataclass
@@ -99,45 +109,46 @@ def generate_ics_payload(user_id: str, hour: int):
     return ICSPayload(filename=filename, content_base64=encoded)
 
 
+def _extract_openai_text(response) -> str:
+    output_text = (getattr(response, "output_text", "") or "").strip()
+    if output_text:
+        return output_text
+
+    output = getattr(response, "output", []) or []
+    chunks = []
+    for item in output:
+        for content in (getattr(item, "content", []) or []):
+            if getattr(content, "type", None) == "output_text":
+                text = (getattr(content, "text", "") or "").strip()
+                if text:
+                    chunks.append(text)
+    return "\n".join(chunks).strip()
+
+
 def ask_external_ai(prompt: str):
-    if not settings.AI_API_URL:
-        raise ExternalAIServiceError("AI_API_URL is not configured.")
+    if not settings.OPENAI_API_KEY:
+        raise ExternalAIServiceError("OPENAI_API_KEY is not configured.")
 
-    headers = {"Content-Type": "application/json"}
-    if settings.AI_API_KEY:
-        headers["Authorization"] = f"Bearer {settings.AI_API_KEY}"
-
-    payload = {"prompt": prompt}
+    client = OpenAI(api_key=settings.OPENAI_API_KEY, timeout=settings.OPENAI_API_TIMEOUT)
 
     try:
-        response = requests.post(
-            settings.AI_API_URL,
-            json=payload,
-            headers=headers,
-            timeout=settings.AI_API_TIMEOUT,
+        response = client.responses.create(
+            model=settings.OPENAI_MODEL,
+            input=[
+                {"role": "system", "content": [{"type": "input_text", "text": ANEMIA_MENSTRUASI_SYSTEM_PROMPT}]},
+                {"role": "user", "content": [{"type": "input_text", "text": prompt}]},
+            ],
         )
-    except requests.RequestException as exc:
-        logger.exception("Failed to call external AI API")
-        raise ExternalAIServiceError("Failed to connect to external AI service.") from exc
+    except Exception as exc:
+        logger.exception("Failed to call OpenAI API")
+        raise ExternalAIServiceError("Failed to connect to OpenAI service.") from exc
 
-    if response.status_code >= 400:
-        logger.warning("External AI API returned error %s: %s", response.status_code, response.text)
-        raise ExternalAIServiceError(
-            f"External AI service returned HTTP {response.status_code}."
-        )
-
-    try:
-        data = response.json()
-    except ValueError as exc:
-        raise ExternalAIServiceError("External AI service response is not valid JSON.") from exc
-
-    answer = data.get("response") or data.get("answer") or data.get("text")
+    answer = _extract_openai_text(response)
     if not answer:
-        raise ExternalAIServiceError(
-            "External AI service response does not contain response/answer/text field."
-        )
+        raise ExternalAIServiceError("OpenAI response does not contain any answer text.")
 
     return answer
+
 
 
 def parse_webhook_mode_and_message(message_text: str):

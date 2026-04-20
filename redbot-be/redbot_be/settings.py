@@ -128,9 +128,9 @@ STATIC_URL = "static/"
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-AI_API_URL = os.getenv("AI_API_URL", "")
-AI_API_KEY = os.getenv("AI_API_KEY", "")
-AI_API_TIMEOUT = int(os.getenv("AI_API_TIMEOUT", "20"))
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-nano")
+OPENAI_API_TIMEOUT = int(os.getenv("OPENAI_API_TIMEOUT", "20"))
 
 WHATSAPP_WEBHOOK_VERIFY_TOKEN = os.getenv("WHATSAPP_WEBHOOK_VERIFY_TOKEN", "")
 WHATSAPP_WEBHOOK_TOKEN = os.getenv("WHATSAPP_WEBHOOK_TOKEN", "")
