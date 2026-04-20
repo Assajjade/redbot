@@ -117,7 +117,7 @@ def _extract_openai_text(response) -> str:
     output = getattr(response, "output", []) or []
     chunks = []
     for item in output:
-        for content in (getattr(item, "content", []) or []):
+        for content in getattr(item, "content", []) or []:
             if getattr(content, "type", None) == "output_text":
                 text = (getattr(content, "text", "") or "").strip()
                 if text:
@@ -129,13 +129,20 @@ def ask_external_ai(prompt: str):
     if not settings.OPENAI_API_KEY:
         raise ExternalAIServiceError("OPENAI_API_KEY is not configured.")
 
-    client = OpenAI(api_key=settings.OPENAI_API_KEY, timeout=settings.OPENAI_API_TIMEOUT)
+    client = OpenAI(
+        api_key=settings.OPENAI_API_KEY, timeout=settings.OPENAI_API_TIMEOUT
+    )
 
     try:
         response = client.responses.create(
             model=settings.OPENAI_MODEL,
             input=[
-                {"role": "system", "content": [{"type": "input_text", "text": ANEMIA_MENSTRUASI_SYSTEM_PROMPT}]},
+                {
+                    "role": "system",
+                    "content": [
+                        {"type": "input_text", "text": ANEMIA_MENSTRUASI_SYSTEM_PROMPT}
+                    ],
+                },
                 {"role": "user", "content": [{"type": "input_text", "text": prompt}]},
             ],
         )
@@ -145,10 +152,11 @@ def ask_external_ai(prompt: str):
 
     answer = _extract_openai_text(response)
     if not answer:
-        raise ExternalAIServiceError("OpenAI response does not contain any answer text.")
+        raise ExternalAIServiceError(
+            "OpenAI response does not contain any answer text."
+        )
 
     return answer
-
 
 
 def parse_webhook_mode_and_message(message_text: str):
@@ -176,10 +184,11 @@ def extract_whatsapp_message(payload: dict):
     except (IndexError, AttributeError, TypeError) as exc:
         raise InputValidationError("Invalid WhatsApp webhook payload format.") from exc
 
+
 def send_whatsapp_message(to_number: str, message_text: str):
     phone_number_id = settings.WHATSAPP_PHONE_NUMBER_ID
     access_token = settings.WHATSAPP_WEBHOOK_TOKEN
-    
+
     if not phone_number_id or not access_token:
         logger.error("Kredensial WhatsApp belum dikonfigurasi di settings.")
         return
@@ -195,10 +204,13 @@ def send_whatsapp_message(to_number: str, message_text: str):
         "type": "text",
         "text": {"body": message_text},
     }
-    
+
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=10)
         response.raise_for_status()
         logger.info(f"Pesan WA berhasil dikirim ke {to_number}")
     except requests.RequestException as exc:
-        logger.error(f"Gagal mengirim pesan WA ke {to_number}: {response.text if 'response' in locals() else exc}")
+        logger.error(
+            f"Gagal mengirim pesan WA ke {to_number}: {response.text if 'response' in locals() else exc}"
+        )
+
