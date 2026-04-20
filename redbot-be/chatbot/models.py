@@ -8,6 +8,7 @@ class PresetState(models.TextChoices):
     AWAITING_HAS_TTD = "awaiting_has_ttd", "Awaiting Has TTD Answer"
     AWAITING_REMINDER_HOUR = "awaiting_reminder_hour", "Awaiting Reminder Hour"
     COMPLETED = "completed", "Completed"
+    CALENDAR_AWAITING_LAST_PERIOD = "calendar_awaiting_last_period", "Calendar Awaiting Last Period Date"
 
 
 class ChatbotUser(models.Model):

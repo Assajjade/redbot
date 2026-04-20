@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import transaction
+from django.http import HttpResponse
 from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.permissions import AllowAny
@@ -23,8 +24,7 @@ from .services import (
 )
 from .utils import log_interaction
 
-
-RESET_COMMANDS = {"reset", "restart"}
+RESET_COMMANDS = {"reset", "restart", "menu", "kembali"}
 RESET_HINT_MESSAGE = (
     "Kamu sudah 3x salah input. Untuk memulai ulang percakapan, "
     "ketik 'reset' atau 'restart'."
@@ -32,7 +32,7 @@ RESET_HINT_MESSAGE = (
 
 
 def reset_preset_user(user: ChatbotUser):
-    user.preset_state = PresetState.AWAITING_MENSTRUATING
+    user.preset_state = PresetState.NOT_STARTED
     user.invalid_input_count = 0
     user.is_currently_menstruating = None
     user.last_period_start_date = None
@@ -106,25 +106,32 @@ def advance_preset_flow(user: ChatbotUser, message: str):
             "response": "Kapan hari pertama haid terakhir kamu? (format DD/MM/YYYY, contoh: 28/01/1970)",
         }
 
-    if user.preset_state == PresetState.AWAITING_LAST_PERIOD_DATE:
-        last_period_start = parse_ddmmyyyy(message)
+    if user.preset_state == PresetState.CALENDAR_AWAITING_LAST_PERIOD:
+        last_period_start = parse_ddmmyyyy(message) 
         user.last_period_start_date = last_period_start
-        user.period_end_date = get_period_end_date(last_period_start)
-        user.preset_state = PresetState.AWAITING_HAS_TTD
-        user.save(
-            update_fields=[
-                "last_period_start_date",
-                "period_end_date",
-                "preset_state",
-                "updated_at",
-            ]
+        
+        user.preset_state = PresetState.NOT_STARTED
+        user.save(update_fields=["last_period_start_date", "preset_state", "updated_at"])
+
+        import datetime
+        next_period_date = last_period_start + datetime.timedelta(days=28)
+        fertile_start = last_period_start + datetime.timedelta(days=12)
+        fertile_end = last_period_start + datetime.timedelta(days=16)
+
+        response_text = (
+            f"📅 *Hasil Kalender Menstruasi*\n\n"
+            f"Berdasarkan haid terakhirmu ({last_period_start.strftime('%d/%m/%Y')}):\n\n"
+            f"🩸 *Perkiraan Haid Berikutnya:* {next_period_date.strftime('%d/%m/%Y')}\n"
+            f"🌸 *Perkiraan Masa Subur:* {fertile_start.strftime('%d/%m/%Y')} - {fertile_end.strftime('%d/%m/%Y')}\n\n"
+            f"_(Catatan: Ini adalah perkiraan kalender dengan asumsi siklus normal 28 hari. Siklus setiap perempuan bisa berbeda-beda.)_\n\n"
+            f"Ketik *menu* untuk kembali ke layar utama."
         )
         return {
             "mode": "preset_interaction",
             "state": user.preset_state,
-            "response": "Apakah kamu punya pil TTD saat ini?",
+            "response": response_text,
         }
-
+    
     if user.preset_state == PresetState.AWAITING_HAS_TTD:
         has_ttd = normalize_yes_no(message)
         if has_ttd is None:
@@ -192,7 +199,13 @@ def handle_preset_interaction(user_id: str, message: str | None, endpoint_name: 
 
         if normalized_message in RESET_COMMANDS:
             reset_preset_user(user)
-            bot_message = "Data kamu sudah direset. Yuk mulai lagi dari awal: Apakah kamu sedang menstruasi sekarang?"
+            bot_message = (
+                "Halo! Selamat datang kembali di *REDBOT*, asisten kesehatan reproduksimu. 👩🏻‍⚕️🩸\n\n"
+                "Ketik angka untuk memilih menu layanan:\n"
+                "1️⃣ QnA Kesehatan\n"
+                "2️⃣ Reminder TTD\n"
+                "3️⃣ Kalender Menstruasi"
+            )
             response_payload = {
                 "mode": "preset_interaction",
                 "state": user.preset_state,
@@ -200,45 +213,58 @@ def handle_preset_interaction(user_id: str, message: str | None, endpoint_name: 
                 "action": "reset",
             }
             log_interaction(
-                user=user,
-                user_id=user_id,
-                mode=InteractionLog.MODE_PRESET,
-                endpoint=endpoint_name,
-                user_message=raw_message,
-                bot_response=bot_message,
-                status=InteractionLog.STATUS_SUCCESS,
-                metadata={
-                    "state": user.preset_state,
-                    "invalid_input_count": user.invalid_input_count,
-                    "action": "reset",
-                },
+                user=user, user_id=user_id, mode=InteractionLog.MODE_PRESET,
+                endpoint=endpoint_name, user_message=raw_message, bot_response=bot_message,
+                status=InteractionLog.STATUS_SUCCESS, metadata={"state": user.preset_state, "action": "reset"}
             )
             return Response(response_payload, status=status.HTTP_200_OK)
 
         if user.preset_state in {PresetState.NOT_STARTED, PresetState.COMPLETED}:
-            user.preset_state = PresetState.AWAITING_MENSTRUATING
-            user.invalid_input_count = 0
-            user.save(update_fields=["preset_state", "invalid_input_count", "updated_at"])
-            bot_message = "Apakah kamu sedang menstruasi sekarang?"
-            log_interaction(
-                user=user,
-                user_id=user_id,
-                mode=InteractionLog.MODE_PRESET,
-                endpoint=endpoint_name,
-                user_message=raw_message,
-                bot_response=bot_message,
-                status=InteractionLog.STATUS_SUCCESS,
-                metadata={"state": user.preset_state},
-            )
-            return Response(
-                {
-                    "mode": "preset_interaction",
-                    "state": user.preset_state,
-                    "response": bot_message,
-                },
-                status=status.HTTP_200_OK,
-            )
+            if normalized_message == "1":
+                bot_message = "Kamu memilih *QnA Kesehatan*. 💬\n\nSilakan tanyakan apa saja seputar menstruasi atau anemia dengan menambahkan awalan *ai:* di awal pesanmu.\n\nContoh: \n*ai: apakah wajar pusing saat haid?*"
+                log_interaction(user=user, user_id=user_id, mode=InteractionLog.MODE_PRESET, endpoint=endpoint_name, user_message=raw_message, bot_response=bot_message)
+                return Response({"mode": "preset_interaction", "state": user.preset_state, "response": bot_message}, status=status.HTTP_200_OK)
+            
+            elif normalized_message == "2":
+                user.preset_state = PresetState.AWAITING_MENSTRUATING
+                user.invalid_input_count = 0
+                user.save(update_fields=["preset_state", "invalid_input_count", "updated_at"])
+                bot_message = "Kamu memilih *Reminder TTD*. 💊\n\nMari kita atur jadwal pengingat minum Tablet Tambah Darah (TTD).\n\nApakah kamu sedang menstruasi sekarang? (Jawab: ya/tidak)"
+                log_interaction(user=user, user_id=user_id, mode=InteractionLog.MODE_PRESET, endpoint=endpoint_name, user_message=raw_message, bot_response=bot_message)
+                return Response({"mode": "preset_interaction", "state": user.preset_state, "response": bot_message}, status=status.HTTP_200_OK)
 
+            elif normalized_message == "3":
+                user.preset_state = PresetState.CALENDAR_AWAITING_LAST_PERIOD
+                user.invalid_input_count = 0
+                user.save(update_fields=["preset_state", "invalid_input_count", "updated_at"])
+                
+                bot_message = "Kamu memilih *Kalender Menstruasi*. 📅\n\nKapan hari pertama haid terakhir kamu? (format DD/MM/YYYY, contoh: 28/01/2026)"
+                log_interaction(user=user, user_id=user_id, mode=InteractionLog.MODE_PRESET, endpoint=endpoint_name, user_message=raw_message, bot_response=bot_message)
+                
+                return Response({"mode": "preset_interaction", "state": user.preset_state, "response": bot_message}, status=status.HTTP_200_OK)
+            
+            else:
+                sapaan_awal = {"halo", "hi", "p", "ping", "mulai", "hai"}
+                
+                if normalized_message in sapaan_awal:
+                    bot_message = (
+                        "Halo! Selamat datang di *REDBOT*, asisten kesehatan reproduksimu. 👩🏻‍⚕️🩸\n\n"
+                        "Ketik angka untuk memilih menu layanan:\n"
+                        "1️⃣ QnA Kesehatan\n"
+                        "2️⃣ Reminder TTD\n"
+                        "3️⃣ Kalender Menstruasi"
+                    )
+                else:
+                    bot_message = (
+                        "Maaf, pilihan tidak valid. 🙏\n\n"
+                        "Mohon ketik angka (1, 2, atau 3) untuk memilih menu layanan:\n"
+                        "1️⃣ QnA Kesehatan\n"
+                        "2️⃣ Reminder TTD\n"
+                        "3️⃣ Kalender Menstruasi"
+                    )
+                
+                log_interaction(user=user, user_id=user_id, mode=InteractionLog.MODE_PRESET, endpoint=endpoint_name, user_message=raw_message, bot_response=bot_message)
+                return Response({"mode": "preset_interaction", "state": user.preset_state, "response": bot_message}, status=status.HTTP_200_OK)
         try:
             response_payload = advance_preset_flow(user, raw_message)
             if user.invalid_input_count != 0:
@@ -258,24 +284,12 @@ def handle_preset_interaction(user_id: str, message: str | None, endpoint_name: 
             interaction_status = InteractionLog.STATUS_ERROR
 
         log_interaction(
-            user=user,
-            user_id=user_id,
-            mode=InteractionLog.MODE_PRESET,
-            endpoint=endpoint_name,
-            user_message=raw_message,
-            bot_response=response_payload.get("response") or response_payload.get("error", ""),
-            status=interaction_status,
-            metadata={
-                "state": user.preset_state,
-                "invalid_input_count": user.invalid_input_count,
-            },
+            user=user, user_id=user_id, mode=InteractionLog.MODE_PRESET, endpoint=endpoint_name,
+            user_message=raw_message, bot_response=response_payload.get("response") or response_payload.get("error", ""),
+            status=interaction_status, metadata={"state": user.preset_state, "invalid_input_count": user.invalid_input_count}
         )
 
-        http_status = (
-            status.HTTP_400_BAD_REQUEST
-            if interaction_status == InteractionLog.STATUS_ERROR
-            else status.HTTP_200_OK
-        )
+        http_status = status.HTTP_400_BAD_REQUEST if interaction_status == InteractionLog.STATUS_ERROR else status.HTTP_200_OK
         return Response(response_payload, status=http_status)
 
 
@@ -436,7 +450,7 @@ class WhatsAppWebhookAPIView(APIView):
         challenge = request.query_params.get("hub.challenge")
 
         if mode == "subscribe" and verify_token and verify_token == settings.WHATSAPP_WEBHOOK_VERIFY_TOKEN:
-            return Response(challenge or "", status=status.HTTP_200_OK)
+            return HttpResponse(challenge or "", status=status.HTTP_200_OK)
 
         return Response({"error": "Webhook verification failed."}, status=status.HTTP_403_FORBIDDEN)
 
@@ -494,10 +508,10 @@ class WhatsAppWebhookAPIView(APIView):
         tags=["WhatsApp Webhook"],
     )
     def post(self, request):
-        expected_token = settings.WHATSAPP_WEBHOOK_TOKEN
-        provided_header = request.headers.get("Authorization", "")
-        if expected_token and provided_header != f"Bearer {expected_token}":
-            return Response({"error": "Invalid webhook bearer token."}, status=status.HTTP_401_UNAUTHORIZED)
+        # expected_token = settings.WHATSAPP_WEBHOOK_TOKEN
+        # provided_header = request.headers.get("Authorization", "")
+        # if expected_token and provided_header != f"Bearer {expected_token}":
+        #     return Response({"error": "Invalid webhook bearer token."}, status=status.HTTP_401_UNAUTHORIZED)
 
         try:
             extracted = extract_whatsapp_message(request.data)
