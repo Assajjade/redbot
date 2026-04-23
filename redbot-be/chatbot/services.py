@@ -214,3 +214,57 @@ def send_whatsapp_message(to_number: str, message_text: str):
             f"Gagal mengirim pesan WA ke {to_number}: {response.text if 'response' in locals() else exc}"
         )
 
+
+def send_whatsapp_document(to_number: str, filename: str, content_base64: str, mime_type: str = "text/calendar"):
+    phone_number_id = settings.WHATSAPP_PHONE_NUMBER_ID
+    access_token = settings.WHATSAPP_WEBHOOK_TOKEN
+
+    if not phone_number_id or not access_token:
+        logger.error("Kredensial WhatsApp belum dikonfigurasi untuk kirim dokumen.")
+        return
+
+    # LANGKAH 1: Upload file ke server Meta untuk mendapatkan Media ID
+    upload_url = f"https://graph.facebook.com/v18.0/{phone_number_id}/media"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    
+    import base64
+    file_bytes = base64.b64decode(content_base64)
+    
+    files = {
+        "file": (filename, file_bytes, mime_type)
+    }
+    data = {
+        "messaging_product": "whatsapp"
+    }
+    
+    try:
+        upload_res = requests.post(upload_url, headers=headers, data=data, files=files, timeout=15)
+        upload_res.raise_for_status()
+        media_id = upload_res.json().get("id")
+        logger.info(f"Berhasil upload media ke Meta. Media ID: {media_id}")
+    except requests.RequestException as exc:
+        logger.error(f"Gagal upload media ke Meta: {upload_res.text if 'upload_res' in locals() else exc}")
+        return
+        
+    # LANGKAH 2: Kirim dokumen tersebut menggunakan Media ID ke user
+    send_url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
+    send_headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    send_payload = {
+        "messaging_product": "whatsapp",
+        "to": to_number,
+        "type": "document",
+        "document": {
+            "id": media_id,
+            "filename": filename
+        }
+    }
+    
+    try:
+        response = requests.post(send_url, headers=send_headers, json=send_payload, timeout=10)
+        response.raise_for_status()
+        logger.info(f"Dokumen ICS berhasil dikirim ke {to_number}")
+    except requests.RequestException as exc:
+        logger.error(f"Gagal mengirim dokumen WA ke {to_number}: {response.text if 'response' in locals() else exc}")

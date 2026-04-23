@@ -23,6 +23,8 @@ from .services import (
     parse_webhook_mode_and_message,
 )
 from .utils import log_interaction
+from .services import send_whatsapp_message, send_whatsapp_document
+
 
 RESET_COMMANDS = {"reset", "restart", "menu", "kembali"}
 RESET_HINT_MESSAGE = (
@@ -535,12 +537,19 @@ class WhatsAppWebhookAPIView(APIView):
                 endpoint_name=self.endpoint_name,
             )
 
-        from .services import send_whatsapp_message
-        
-        # Ambil isi teks balasan dari response internal
         teks_balasan = chatbot_response.data.get("response") or chatbot_response.data.get("error")
         if teks_balasan:
             send_whatsapp_message(to_number=user_id, message_text=teks_balasan)
+            
+        # 2. Cek dan Kirim File Kalender ICS (Jika Ada)
+        ics_file = chatbot_response.data.get("ics_file")
+        if ics_file:
+            send_whatsapp_document(
+                to_number=user_id,
+                filename=ics_file["filename"],
+                content_base64=ics_file["content_base64"],
+                mime_type=ics_file["content_type"]
+            )
             
         return Response(
             {
