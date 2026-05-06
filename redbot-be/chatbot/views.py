@@ -1,12 +1,17 @@
 from django.conf import settings
 from django.db import transaction
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
+
+import json
+import requests
+import os
+from django.views.decorators.csrf import csrf_exempt
 
 from .models import ChatbotUser, InteractionLog, PresetState
 from .serializers import ModeDispatchSerializer, WhatsAppWebhookPayloadSerializer
@@ -31,6 +36,52 @@ RESET_HINT_MESSAGE = (
     "Kamu sudah 3x salah input. Untuk memulai ulang percakapan, "
     "ketik 'reset' atau 'restart'."
 )
+
+
+
+@csrf_exempt
+def whatsapp_webhook(request):
+    if request.method == 'POST':
+        try:
+            # Fonnte biasanya mengirimkan data dalam format JSON
+            data = json.loads(request.body)
+            
+            # Mengambil nomor pengirim dan isi pesan dari Fonnte
+            sender = data.get('sender')
+            message = data.get('message')
+            
+            # Jika ini bukan pesan biasa (misal pesan sistem Fonnte), abaikan
+            if not sender or not message:
+                return JsonResponse({"status": "ignored"}, status=200)
+
+            # ---------------------------------------------------------
+            # DI SINI LOGIKA OPENAI / BOT ANDA BERJALAN
+            # Contoh: bot_reply = dapatkan_balasan_dari_gpt(message)
+            bot_reply = f"Halo, Anda mengirim: {message}. Ini balasan dari Fonnte!"
+            # ---------------------------------------------------------
+
+            # Mengirim pesan balasan menggunakan API Fonnte
+            fonnte_url = "https://api.fonnte.com/send"
+            headers = {
+                "Authorization": os.getenv("FONNTE_TOKEN")
+            }
+            payload = {
+                "target": sender,
+                "message": bot_reply
+            }
+            
+            # Eksekusi pengiriman pesan
+            requests.post(fonnte_url, headers=headers, data=payload)
+            
+            # Harus membalas 200 OK agar Fonnte tahu pesan sukses diterima
+            return JsonResponse({"status": "success"}, status=200)
+            
+        except Exception as e:
+            print(f"Error processing webhook: {e}")
+            return JsonResponse({"status": "error"}, status=500)
+
+    # Menangani request GET (Fonnte tidak butuh proses verifikasi rumit seperti Meta)
+    return JsonResponse({"status": "Webhook is active!"}, status=200)
 
 
 def reset_preset_user(user: ChatbotUser):
