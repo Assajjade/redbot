@@ -1,5 +1,6 @@
 import base64
 import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -7,6 +8,7 @@ import requests
 from openai import OpenAI
 from django.conf import settings
 from django.utils import timezone
+
 
 logger = logging.getLogger(__name__)
 
@@ -186,85 +188,56 @@ def extract_whatsapp_message(payload: dict):
 
 
 def send_whatsapp_message(to_number: str, message_text: str):
-    phone_number_id = settings.WHATSAPP_PHONE_NUMBER_ID
-    access_token = settings.WHATSAPP_WEBHOOK_TOKEN
-
-    if not phone_number_id or not access_token:
-        logger.error("Kredensial WhatsApp belum dikonfigurasi di settings.")
+    fonnte_token = os.getenv("FONNTE_TOKEN")
+    
+    if not fonnte_token:
+        logger.error("Kredensial FONNTE_TOKEN belum dikonfigurasi di file .env.")
         return
 
-    url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
+    url = "https://api.fonnte.com/send"
     headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json",
+        "Authorization": fonnte_token
     }
     payload = {
-        "messaging_product": "whatsapp",
-        "to": to_number,
-        "type": "text",
-        "text": {"body": message_text},
+        "target": to_number,
+        "message": message_text
     }
 
     try:
-        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        response = requests.post(url, data=payload, headers=headers, timeout=10)
         response.raise_for_status()
-        logger.info(f"Pesan WA berhasil dikirim ke {to_number}")
+        logger.info(f"Pesan Fonnte berhasil dikirim ke {to_number}")
     except requests.RequestException as exc:
-        logger.error(
-            f"Gagal mengirim pesan WA ke {to_number}: {response.text if 'response' in locals() else exc}"
-        )
+        logger.error(f"Gagal mengirim pesan Fonnte ke {to_number}: {exc}")
 
 
 def send_whatsapp_document(to_number: str, filename: str, content_base64: str, mime_type: str = "text/calendar"):
-    phone_number_id = settings.WHATSAPP_PHONE_NUMBER_ID
-    access_token = settings.WHATSAPP_WEBHOOK_TOKEN
-
-    if not phone_number_id or not access_token:
-        logger.error("Kredensial WhatsApp belum dikonfigurasi untuk kirim dokumen.")
+    fonnte_token = os.getenv("FONNTE_TOKEN")
+    
+    if not fonnte_token:
+        logger.error("Kredensial FONNTE_TOKEN belum dikonfigurasi.")
         return
 
-    # LANGKAH 1: Upload file ke server Meta untuk mendapatkan Media ID
-    upload_url = f"https://graph.facebook.com/v18.0/{phone_number_id}/media"
-    headers = {"Authorization": f"Bearer {access_token}"}
+    url = "https://api.fonnte.com/send"
+    headers = {
+        "Authorization": fonnte_token
+    }
     
+    # Dekode base64 agar menjadi bentuk file biner
     import base64
     file_bytes = base64.b64decode(content_base64)
     
+    payload = {
+        "target": to_number,
+    }
     files = {
         "file": (filename, file_bytes, mime_type)
     }
-    data = {
-        "messaging_product": "whatsapp"
-    }
     
     try:
-        upload_res = requests.post(upload_url, headers=headers, data=data, files=files, timeout=15)
-        upload_res.raise_for_status()
-        media_id = upload_res.json().get("id")
-        logger.info(f"Berhasil upload media ke Meta. Media ID: {media_id}")
-    except requests.RequestException as exc:
-        logger.error(f"Gagal upload media ke Meta: {upload_res.text if 'upload_res' in locals() else exc}")
-        return
-        
-    # LANGKAH 2: Kirim dokumen tersebut menggunakan Media ID ke user
-    send_url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
-    send_headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json",
-    }
-    send_payload = {
-        "messaging_product": "whatsapp",
-        "to": to_number,
-        "type": "document",
-        "document": {
-            "id": media_id,
-            "filename": filename
-        }
-    }
-    
-    try:
-        response = requests.post(send_url, headers=send_headers, json=send_payload, timeout=10)
+        # Fonnte bisa menerima dokumen via upload form-data
+        response = requests.post(url, headers=headers, data=payload, files=files, timeout=15)
         response.raise_for_status()
-        logger.info(f"Dokumen ICS berhasil dikirim ke {to_number}")
+        logger.info(f"Dokumen ICS Fonnte berhasil dikirim ke {to_number}")
     except requests.RequestException as exc:
-        logger.error(f"Gagal mengirim dokumen WA ke {to_number}: {response.text if 'response' in locals() else exc}")
+        logger.error(f"Gagal mengirim dokumen Fonnte ke {to_number}: {exc}")

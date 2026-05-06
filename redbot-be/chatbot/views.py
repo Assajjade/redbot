@@ -37,53 +37,6 @@ RESET_HINT_MESSAGE = (
     "ketik 'reset' atau 'restart'."
 )
 
-
-
-@csrf_exempt
-def whatsapp_webhook(request):
-    if request.method == 'POST':
-        try:
-            # Fonnte biasanya mengirimkan data dalam format JSON
-            data = json.loads(request.body)
-            
-            # Mengambil nomor pengirim dan isi pesan dari Fonnte
-            sender = data.get('sender')
-            message = data.get('message')
-            
-            # Jika ini bukan pesan biasa (misal pesan sistem Fonnte), abaikan
-            if not sender or not message:
-                return JsonResponse({"status": "ignored"}, status=200)
-
-            # ---------------------------------------------------------
-            # DI SINI LOGIKA OPENAI / BOT ANDA BERJALAN
-            # Contoh: bot_reply = dapatkan_balasan_dari_gpt(message)
-            bot_reply = f"Halo, Anda mengirim: {message}. Ini balasan dari Fonnte!"
-            # ---------------------------------------------------------
-
-            # Mengirim pesan balasan menggunakan API Fonnte
-            fonnte_url = "https://api.fonnte.com/send"
-            headers = {
-                "Authorization": os.getenv("FONNTE_TOKEN")
-            }
-            payload = {
-                "target": sender,
-                "message": bot_reply
-            }
-            
-            # Eksekusi pengiriman pesan
-            requests.post(fonnte_url, headers=headers, data=payload)
-            
-            # Harus membalas 200 OK agar Fonnte tahu pesan sukses diterima
-            return JsonResponse({"status": "success"}, status=200)
-            
-        except Exception as e:
-            print(f"Error processing webhook: {e}")
-            return JsonResponse({"status": "error"}, status=500)
-
-    # Menangani request GET (Fonnte tidak butuh proses verifikasi rumit seperti Meta)
-    return JsonResponse({"status": "Webhook is active!"}, status=200)
-
-
 def reset_preset_user(user: ChatbotUser):
     user.preset_state = PresetState.NOT_STARTED
     user.invalid_input_count = 0
@@ -561,19 +514,19 @@ class WhatsAppWebhookAPIView(APIView):
         tags=["WhatsApp Webhook"],
     )
     def post(self, request):
-        # expected_token = settings.WHATSAPP_WEBHOOK_TOKEN
-        # provided_header = request.headers.get("Authorization", "")
-        # if expected_token and provided_header != f"Bearer {expected_token}":
-        #     return Response({"error": "Invalid webhook bearer token."}, status=status.HTTP_401_UNAUTHORIZED)
+        # 1. Ambil data dari Fonnte
+        sender = request.data.get("sender")
+        message_text = request.data.get("message")
 
-        try:
-            extracted = extract_whatsapp_message(request.data)
-        except InputValidationError as exc:
-            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        # Abaikan jika tidak ada pesan/pengirim yang valid (misal pesan sistem)
+        if not sender or not message_text:
+             return Response({"status": "ignored"}, status=status.HTTP_200_OK)
 
-        mode, normalized_text = parse_webhook_mode_and_message(extracted.get("message", ""))
-        user_id = extracted["user_id"]
+        # 2. Tentukan Mode (AI atau Preset)
+        mode, normalized_text = parse_webhook_mode_and_message(message_text)
+        user_id = str(sender)
 
+        # 3. Masukkan ke Logika Bot Utama Anda
         if mode == InteractionLog.MODE_AI_QNA:
             if not normalized_text:
                 return Response(
@@ -588,11 +541,12 @@ class WhatsAppWebhookAPIView(APIView):
                 endpoint_name=self.endpoint_name,
             )
 
+        # 4. Ambil teks balasan dan kirim ke Fonnte
         teks_balasan = chatbot_response.data.get("response") or chatbot_response.data.get("error")
         if teks_balasan:
             send_whatsapp_message(to_number=user_id, message_text=teks_balasan)
             
-        # 2. Cek dan Kirim File Kalender ICS (Jika Ada)
+        # 5. Cek dan Kirim File Kalender ICS (Jika Ada)
         ics_file = chatbot_response.data.get("ics_file")
         if ics_file:
             send_whatsapp_document(
@@ -602,16 +556,4 @@ class WhatsAppWebhookAPIView(APIView):
                 mime_type=ics_file["content_type"]
             )
             
-        return Response(
-            {
-                "status": "processed",
-                "provider": "whatsapp",
-                "inbound": {
-                    "user_id": user_id,
-                    "mode": mode,
-                    "message": normalized_text,
-                },
-                "chatbot_response": chatbot_response.data,
-            },
-            status=chatbot_response.status_code,
-        )
+        return Response({"status": "processed"}, status=status.HTTP_200_OK)
