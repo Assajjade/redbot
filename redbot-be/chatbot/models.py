@@ -1,15 +1,24 @@
 from django.db import models
 
-
 class PresetState(models.TextChoices):
     NOT_STARTED = "not_started", "Not Started"
+    
+    # State Baru untuk Menu Bersarang
+    AWAITING_PERSONA = "awaiting_persona", "Awaiting Persona"
+    AWAITING_MAIN_MENU = "awaiting_main_menu", "Awaiting Main Menu"
+    AWAITING_TOPIC = "awaiting_topic", "Awaiting Topic Selection"
+    AWAITING_FAQ_QUESTION = "awaiting_faq_question", "Awaiting FAQ Question Number"
+    AWAITING_ASK_MORE = "awaiting_ask_more", "Awaiting Ask More Decision"
+    AWAITING_TOPIC_RESELECT = "awaiting_topic_reselect", "Awaiting Topic Reselection"
+    AWAITING_MANUAL_QUESTION = "awaiting_manual_question", "Awaiting Manual Question"
+    
+    # State Lama (untuk fitur Remaja Putri)
     AWAITING_MENSTRUATING = "awaiting_menstruating", "Awaiting Menstruating Answer"
     AWAITING_LAST_PERIOD_DATE = "awaiting_last_period_date", "Awaiting Last Period Date"
     AWAITING_HAS_TTD = "awaiting_has_ttd", "Awaiting Has TTD Answer"
     AWAITING_REMINDER_HOUR = "awaiting_reminder_hour", "Awaiting Reminder Hour"
     COMPLETED = "completed", "Completed"
     CALENDAR_AWAITING_LAST_PERIOD = "calendar_awaiting_last_period", "Calendar Awaiting Last Period Date"
-
 
 class ChatbotUser(models.Model):
     user_id = models.CharField(max_length=64, unique=True)
@@ -19,6 +28,11 @@ class ChatbotUser(models.Model):
         default=PresetState.NOT_STARTED,
     )
     invalid_input_count = models.PositiveSmallIntegerField(default=0)
+
+    # --- FIELD BARU UNTUK KONSEP MENU ---
+    persona = models.CharField(max_length=32, null=True, blank=True) # Isi: 'ibu_hamil' atau 'remaja_putri'
+    selected_topic = models.CharField(max_length=32, null=True, blank=True) # Isi: 'anemia', 'ttd', 'umum'
+    # ------------------------------------
 
     is_currently_menstruating = models.BooleanField(null=True, blank=True)
     last_period_start_date = models.DateField(null=True, blank=True)

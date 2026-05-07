@@ -514,11 +514,11 @@ class WhatsAppWebhookAPIView(APIView):
         tags=["WhatsApp Webhook"],
     )
     def post(self, request):
-        # 1. Ambil data dari Fonnte
+        # 1. Ambil data dari Fonnte (Bebas dari Meta extract_whatsapp_message)
         sender = request.data.get("sender")
         message_text = request.data.get("message")
 
-        # Abaikan jika tidak ada pesan/pengirim yang valid (misal pesan sistem)
+        # Abaikan jika tidak ada pesan/pengirim yang valid (misal pesan sistem Fonnte)
         if not sender or not message_text:
              return Response({"status": "ignored"}, status=status.HTTP_200_OK)
 
